@@ -10,7 +10,7 @@ pub fn build_home() -> libadwaita::gtk::Box {
     let join_page = join::build_page();
     let host_page = host::build_page();
 
-    let view_stack = ViewStack::new();
+    let view_stack = ViewStack::builder().vexpand(true).build();
     view_stack.add_titled_with_icon(
         &join_page,
         Some("join"),
@@ -31,7 +31,6 @@ pub fn build_home() -> libadwaita::gtk::Box {
     toolbar_view.add_top_bar(&header_bar);
 
     let content = libadwaita::gtk::Box::new(Orientation::Vertical, 0);
-    content.append(&header_bar);
     content.append(&toolbar_view);
     content
 }
