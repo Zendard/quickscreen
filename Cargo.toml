@@ -1,0 +1,7 @@
+[package]
+name = "quickscreen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libadwaita = {version="0.8.0", features=["v1_4"]}
