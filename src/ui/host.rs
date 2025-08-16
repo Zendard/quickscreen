@@ -2,7 +2,7 @@ use crate::host::{HostingToUIMessage, UIToHostingMessage};
 use libadwaita::{
     glib::object::{IsA, ObjectExt},
     gtk::{
-        Align, Button, Entry, EntryBuffer, Label, Stack, Widget,
+        Align, Button, Entry, EntryBuffer, Label, MediaFile, MediaStream, Stack, Widget,
         prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
     },
 };
