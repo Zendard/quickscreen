@@ -12,15 +12,22 @@ pub fn build_page() -> impl IsA<Widget> {
         .css_classes(["title-1"])
         .build();
 
+    let port_label = Label::builder().label("Port").halign(Align::Start).build();
     let port_buffer = EntryBuffer::new(None::<String>);
     let port_input = Entry::builder()
-        .width_request(200)
-        .halign(Align::Center)
         .placeholder_text("1234")
         .input_purpose(libadwaita::gtk::InputPurpose::Digits)
         .max_length(4)
         .buffer(&port_buffer)
         .build();
+    let port_box = libadwaita::gtk::Box::builder()
+        .orientation(libadwaita::gtk::Orientation::Vertical)
+        .spacing(4)
+        .halign(Align::Center)
+        .width_request(200)
+        .build();
+    port_box.append(&port_label);
+    port_box.append(&port_input);
 
     // Only allow digits to be typed in port_input
     port_input
@@ -45,7 +52,7 @@ pub fn build_page() -> impl IsA<Widget> {
         .spacing(16)
         .build();
     content.append(&title);
-    content.append(&port_input);
+    content.append(&port_box);
     content.append(&button);
 
     content
