@@ -2,7 +2,7 @@ use libadwaita::{
     glib::object::{IsA, ObjectExt},
     gtk::{
         Align, Button, Entry, EntryBuffer, Label, Widget,
-        prelude::{BoxExt, EditableExt, EditableExtManual},
+        prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
     },
 };
 
@@ -46,6 +46,8 @@ pub fn build_page() -> impl IsA<Widget> {
         .halign(Align::Center)
         .build();
 
+    button.connect_clicked(move |_| start_hosting(port_buffer.text().to_string()));
+
     let content = libadwaita::gtk::Box::builder()
         .orientation(libadwaita::gtk::Orientation::Vertical)
         .valign(Align::Center)
@@ -56,4 +58,13 @@ pub fn build_page() -> impl IsA<Widget> {
     content.append(&button);
 
     content
+}
+
+fn start_hosting(port_string: String) {
+    if port_string.len() < 4 {
+        return;
+    }
+
+    let port: u16 = port_string.parse().unwrap();
+    println!("Hosting on port {}", port)
 }
