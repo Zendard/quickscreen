@@ -4,6 +4,7 @@ use libadwaita::{
     gtk::prelude::GtkWindowExt,
 };
 
+mod host;
 mod ui;
 
 fn main() {
