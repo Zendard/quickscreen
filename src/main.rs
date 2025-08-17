@@ -5,6 +5,7 @@ use libadwaita::{
 };
 
 mod host;
+mod join;
 mod ui;
 
 fn main() {
