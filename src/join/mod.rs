@@ -1,6 +1,5 @@
 use crate::host::network::{
-    CLIENT_TO_HOST_MESSAGE_SIZE, ClientID, ClientToHostNetworkMessage, HOST_TO_CLIENT_MESSAGE_SIZE,
-    HostToClientNetworkMessage,
+    ClientID, ClientToHostNetworkMessage, HOST_TO_CLIENT_MESSAGE_SIZE, HostToClientNetworkMessage,
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
@@ -25,13 +24,12 @@ pub fn join(
     udp_socket.connect(SocketAddr::new(address, port)).unwrap();
 
     let id = ClientID::generate();
-    let network_buffer: [u8; CLIENT_TO_HOST_MESSAGE_SIZE] =
-        ClientToHostNetworkMessage::JoinRequest(id).into();
+    let network_buffer: Vec<u8> = ClientToHostNetworkMessage::JoinRequest(id).into();
     udp_socket.send(&network_buffer).unwrap();
 
     udp_socket.set_nonblocking(true).unwrap();
 
-    let mut network_buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
+    let mut network_buffer = Vec::with_capacity(HOST_TO_CLIENT_MESSAGE_SIZE);
     loop {
         if let Ok(message) = message_receiver.try_recv() {
             match message {
@@ -44,7 +42,7 @@ pub fn join(
             && bytes_amount >= std::mem::size_of::<HostToClientNetworkMessage>()
         {
             udp_socket.recv(&mut network_buffer).unwrap();
-            let network_message = HostToClientNetworkMessage::try_from(network_buffer);
+            let network_message = HostToClientNetworkMessage::try_from(network_buffer.as_slice());
             if network_message.is_err() {
                 continue;
             }
@@ -54,8 +52,7 @@ pub fn join(
     }
     println!("Leaving...");
 
-    let network_buffer: [u8; CLIENT_TO_HOST_MESSAGE_SIZE] =
-        ClientToHostNetworkMessage::Left(id).into();
+    let network_buffer: Vec<u8> = ClientToHostNetworkMessage::Left(id).into();
     udp_socket.send(&network_buffer).unwrap();
 }
 
@@ -67,7 +64,7 @@ fn handle_network_message(
         HostToClientNetworkMessage::JoinRequestResponse(accepted) => {
             handle_join_request_response(accepted, message_sender)
         }
-        HostToClientNetworkMessage::Frame(frame) => return,
+        HostToClientNetworkMessage::Frame(frame) => (),
     }
 }
 

@@ -1,4 +1,4 @@
-use scap::frame::BGRxFrame;
+use crate::host::capture::NetworkFrame;
 use std::{
     hash::Hash,
     net::{SocketAddr, UdpSocket},
@@ -26,7 +26,7 @@ pub struct Client {
 
 impl Client {
     pub fn send_message(&self, socket: &UdpSocket, message: HostToClientNetworkMessage) {
-        let buffer: [u8; HOST_TO_CLIENT_MESSAGE_SIZE] = message.into();
+        let buffer: Vec<u8> = message.into();
         socket.send_to(&buffer, self.address).unwrap();
     }
 }
@@ -38,11 +38,11 @@ pub enum ClientToHostNetworkMessage {
 }
 pub const CLIENT_TO_HOST_MESSAGE_SIZE: usize = 3;
 
-impl From<ClientToHostNetworkMessage> for [u8; CLIENT_TO_HOST_MESSAGE_SIZE] {
+impl From<ClientToHostNetworkMessage> for Vec<u8> {
     fn from(value: ClientToHostNetworkMessage) -> Self {
         match value {
-            ClientToHostNetworkMessage::JoinRequest(id) => [1, id.0 as u8, (id.0 >> 8) as u8],
-            ClientToHostNetworkMessage::Left(id) => [2, id.0 as u8, (id.0 >> 8) as u8],
+            ClientToHostNetworkMessage::JoinRequest(id) => vec![1, id.0 as u8, (id.0 >> 8) as u8],
+            ClientToHostNetworkMessage::Left(id) => vec![2, (id.0 as u8), ((id.0 >> 8) as u8)],
         }
     }
 }
@@ -54,9 +54,9 @@ pub enum NetworkConversionError {
     MalformedMessage,
 }
 
-impl TryFrom<[u8; CLIENT_TO_HOST_MESSAGE_SIZE]> for ClientToHostNetworkMessage {
+impl TryFrom<&[u8]> for ClientToHostNetworkMessage {
     type Error = NetworkConversionError;
-    fn try_from(value: [u8; CLIENT_TO_HOST_MESSAGE_SIZE]) -> Result<Self, Self::Error> {
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         let first_byte = value.first().ok_or(NetworkConversionError::EmptyBuffer)?;
         match first_byte {
             1 => {
@@ -91,35 +91,24 @@ impl TryFrom<[u8; CLIENT_TO_HOST_MESSAGE_SIZE]> for ClientToHostNetworkMessage {
 #[derive(Debug)]
 pub enum HostToClientNetworkMessage {
     JoinRequestResponse(bool),
-    Frame(BGRxFrame),
+    Frame(NetworkFrame),
 }
-pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = std::mem::size_of::<BGRxFrame>() + 1;
+pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = 1920 * 1080 * 3 + 1;
 
-impl From<HostToClientNetworkMessage> for [u8; HOST_TO_CLIENT_MESSAGE_SIZE] {
+impl From<HostToClientNetworkMessage> for Vec<u8> {
     fn from(value: HostToClientNetworkMessage) -> Self {
         match value {
-            HostToClientNetworkMessage::JoinRequestResponse(accepted) => {
-                let mut buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
-                buffer[0] = 1;
-                buffer[1] = accepted as u8;
-                buffer
-            }
+            HostToClientNetworkMessage::JoinRequestResponse(accepted) => vec![0, (accepted as u8)],
             HostToClientNetworkMessage::Frame(frame) => {
-                let mut vec = frame.data.clone();
-                vec.push(2);
-                let mut buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
-                for i in 0..buffer.len() {
-                    buffer[i] = *vec.get(i).unwrap_or(&0);
-                }
-                buffer
+                frame.data.iter().flat_map(|i| [i.0, i.1, i.2]).collect()
             }
         }
     }
 }
 
-impl TryFrom<[u8; HOST_TO_CLIENT_MESSAGE_SIZE]> for HostToClientNetworkMessage {
+impl TryFrom<&[u8]> for HostToClientNetworkMessage {
     type Error = NetworkConversionError;
-    fn try_from(value: [u8; HOST_TO_CLIENT_MESSAGE_SIZE]) -> Result<Self, Self::Error> {
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         let first_byte = value.first().ok_or(NetworkConversionError::EmptyBuffer)?;
         match first_byte {
             1 => {
@@ -131,5 +120,35 @@ impl TryFrom<[u8; HOST_TO_CLIENT_MESSAGE_SIZE]> for HostToClientNetworkMessage {
             }
             _ => Err(NetworkConversionError::UnrecognizedSignature),
         }
+    }
+}
+
+pub trait LargeSend {
+    fn send_to_large(
+        &self,
+        bytes: &[u8],
+        address: SocketAddr,
+    ) -> Result<(), Box<dyn std::error::Error>>;
+}
+
+const MAX_UDP_SEND_SIZE: usize = 65507;
+impl LargeSend for UdpSocket {
+    fn send_to_large(
+        &self,
+        bytes: &[u8],
+        address: SocketAddr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let amount_of_slices = bytes.len() / MAX_UDP_SEND_SIZE;
+
+        let mut remaining_slice = bytes;
+
+        for _ in 0..amount_of_slices {
+            let (left_slice, right_slice) = remaining_slice.split_at(MAX_UDP_SEND_SIZE - 1);
+            self.send_to(left_slice, address)?;
+            remaining_slice = right_slice;
+        }
+        self.send_to(remaining_slice, address)?;
+
+        Ok(())
     }
 }

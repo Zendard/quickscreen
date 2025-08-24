@@ -2,8 +2,7 @@ use scap::{capturer::Capturer, frame::Frame};
 
 use self::network::ClientToHostNetworkMessage;
 use crate::host::network::{
-    CLIENT_TO_HOST_MESSAGE_SIZE, Client, ClientID, HOST_TO_CLIENT_MESSAGE_SIZE,
-    HostToClientNetworkMessage,
+    CLIENT_TO_HOST_MESSAGE_SIZE, Client, ClientID, HostToClientNetworkMessage, LargeSend,
 };
 use std::{
     collections::HashMap,
@@ -50,9 +49,24 @@ pub fn host(
     };
 
     state.capturer.start_capture();
+    let frame = state.capturer.get_next_frame().unwrap();
+    match frame {
+        Frame::RGB(_) => println!("RGB frame"),
+        Frame::BGRA(_) => println!("BGRA frame"),
+        Frame::RGBx(_) => println!("RGBx frame"),
+        Frame::XBGR(_) => println!("XBGR frame"),
+        Frame::BGRx(_) => println!("BGRx frame"),
+        Frame::BGR0(_) => println!("BGR0 frame"),
+        Frame::YUVFrame(_) => println!("YUBFrame frame"),
+    }
 
-    let mut client_to_host_buffer = [0; CLIENT_TO_HOST_MESSAGE_SIZE];
-    let mut host_to_client_buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
+    if let Frame::RGB(frame) = frame {
+        dbg!(frame.width);
+        dbg!(frame.height);
+        dbg!(frame.data.len());
+    }
+
+    let client_to_host_buffer = &mut [0; CLIENT_TO_HOST_MESSAGE_SIZE];
     state.udp_socket.set_nonblocking(true).unwrap();
 
     loop {
@@ -65,44 +79,25 @@ pub fn host(
             }
         }
         let frame = state.capturer.get_next_frame().unwrap();
-        // match frame {
-        //     Frame::RGB(_) => println!("RGB frame"),
-        //     Frame::BGRA(_) => println!("BGRA frame"),
-        //     Frame::RGBx(_) => println!("RGBx frame"),
-        //     Frame::XBGR(_) => println!("XBGR frame"),
-        //     Frame::BGRx(_) => println!("BGRx frame"),
-        //     Frame::BGR0(_) => println!("BGR0 frame"),
-        //     Frame::YUVFrame(_) => println!("YUBFrame frame"),
-        // }
-        if let Frame::BGRx(frame) = frame {
-            host_to_client_buffer = HostToClientNetworkMessage::Frame(frame).into();
-            state.accepted_clients.values().for_each(|client| {
-                state
-                    .udp_socket
-                    .send_to(&host_to_client_buffer, client.address)
-                    .unwrap();
-                // println!("Sent frame packet to client {}", client.id.0);
-            });
-        }
-
-        if let Ok(bytes_amount) = state.udp_socket.peek(&mut [0; CLIENT_TO_HOST_MESSAGE_SIZE])
-            && bytes_amount >= CLIENT_TO_HOST_MESSAGE_SIZE
-        {
-            let (_, origin) = state
+        let network_vec: Vec<u8> = HostToClientNetworkMessage::Frame(frame.into()).into();
+        state.accepted_clients.values().for_each(|client| {
+            state
                 .udp_socket
-                .recv_from(&mut client_to_host_buffer)
+                .send_to_large(network_vec.as_slice(), client.address)
                 .unwrap();
-            let network_message = ClientToHostNetworkMessage::try_from(client_to_host_buffer);
-            if network_message.is_err() {
-                continue;
-            }
+            // println!("Sent frame packet to client {}", client.id.0);
+        });
 
-            handle_network_message(
-                network_message.unwrap(),
-                origin,
-                &message_sender,
-                &mut state,
-            );
+        let network_result = state.udp_socket.peek_from(client_to_host_buffer);
+
+        if let Ok((_, origin)) = network_result {
+            dbg!(&client_to_host_buffer);
+            let message_result = client_to_host_buffer.as_slice().try_into();
+            dbg!(&message_result);
+            if let Ok(network_message) = message_result {
+                state.udp_socket.recv(&mut []).unwrap();
+                handle_network_message(network_message, origin, &message_sender, &mut state);
+            }
         }
     }
 
