@@ -127,6 +127,6 @@ fn handle_join_request_response(client_id: ClientID, accepted: bool, state: &mut
     }
     client.send_message(
         &state.udp_socket,
-        HostToClientNetworkMessage::JoinRequestResponse(true),
+        HostToClientNetworkMessage::JoinRequestResponse(accepted),
     );
 }

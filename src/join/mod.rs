@@ -1,10 +1,12 @@
-use crate::host::network::{ClientID, ClientToHostNetworkMessage};
+use crate::host::network::{ClientID, ClientToHostNetworkMessage, HostToClientNetworkMessage};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     sync::mpsc::{Receiver, Sender},
 };
 
-pub enum JoinedToUIMessage {}
+pub enum JoinedToUIMessage {
+    JoinRequestResponse(bool),
+}
 pub enum UIToJoinedMessage {
     Leave,
 }
@@ -15,18 +17,55 @@ pub fn join(
     message_sender: Sender<JoinedToUIMessage>,
     message_receiver: Receiver<UIToJoinedMessage>,
 ) {
-    let socket =
+    let udp_socket =
         UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port + 1)).unwrap();
-    socket.connect(SocketAddr::new(address, port)).unwrap();
+    udp_socket.connect(SocketAddr::new(address, port)).unwrap();
+
     let id = ClientID::generate();
-    let network_buffer: [u8; 3] = ClientToHostNetworkMessage::JoinRequest(id).into();
-    socket.send(&network_buffer).unwrap();
+    let network_buffer: [u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1] =
+        ClientToHostNetworkMessage::JoinRequest(id).into();
+    udp_socket.send(&network_buffer).unwrap();
+
+    udp_socket.set_nonblocking(true).unwrap();
+
+    let mut network_buffer = [0; std::mem::size_of::<HostToClientNetworkMessage>() + 1];
     loop {
         if let Ok(message) = message_receiver.try_recv() {
             match message {
                 UIToJoinedMessage::Leave => break,
             }
         }
+
+        if let Ok(bytes_amount) =
+            udp_socket.peek(&mut [0; std::mem::size_of::<HostToClientNetworkMessage>()])
+        {
+            if bytes_amount >= std::mem::size_of::<HostToClientNetworkMessage>() {
+                udp_socket.recv(&mut network_buffer).unwrap();
+                let network_message = HostToClientNetworkMessage::try_from(network_buffer);
+                if network_message.is_err() {
+                    continue;
+                }
+
+                handle_network_message(network_message.unwrap(), &message_sender);
+            }
+        }
     }
     println!("Leaving...");
+}
+
+fn handle_network_message(
+    message: HostToClientNetworkMessage,
+    message_sender: &Sender<JoinedToUIMessage>,
+) {
+    match message {
+        HostToClientNetworkMessage::JoinRequestResponse(accepted) => {
+            handle_join_request_response(accepted, message_sender)
+        }
+    }
+}
+
+fn handle_join_request_response(accepted: bool, message_sender: &Sender<JoinedToUIMessage>) {
+    message_sender
+        .send(JoinedToUIMessage::JoinRequestResponse(accepted))
+        .unwrap();
 }

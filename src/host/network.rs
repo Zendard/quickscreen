@@ -106,6 +106,7 @@ impl TryFrom<[u8; std::mem::size_of::<HostToClientNetworkMessage>() + 1]>
                 let accepted = *value
                     .get(1)
                     .ok_or(NetworkConversionError::MalformedMessage)?;
+                dbg!(accepted);
                 Ok(Self::JoinRequestResponse(accepted != 0))
             }
             _ => Err(NetworkConversionError::UnrecognizedSignature),

@@ -183,7 +183,6 @@ fn listen_for_message(state: &mut HostState) {
 }
 
 fn handle_join_request(client_id: ClientID, state: &HostState) {
-    println!("Showing join request dialog");
     let message_sender = state
         .message_sender
         .lock()
