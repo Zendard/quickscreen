@@ -13,6 +13,8 @@ pub mod network;
 pub enum HostingToUIMessage {
     JoinRequest(ClientID),
 }
+
+#[derive(Debug)]
 pub enum UIToHostingMessage {
     Stop,
     JoinRequestResponse(ClientID, bool),
@@ -43,15 +45,20 @@ pub fn host(
     // state.capturer.start_capture();
 
     let mut network_buffer = [0; std::mem::size_of::<ClientToHostNetworkMessage>() + 1];
+    state.udp_socket.set_nonblocking(true).unwrap();
 
     loop {
         if let Ok(message) = message_receiver.try_recv() {
+            dbg!(&message);
             match message {
                 UIToHostingMessage::Stop => break,
                 UIToHostingMessage::JoinRequestResponse(client_id, accepted) => {
+                    println!("Received join request response");
                     if accepted {
+                        println!("Client {} accepted", &client_id.0);
                         state.accepted_clients.insert(client_id);
                     } else {
+                        println!("Client {} refused", &client_id.0);
                         state.refused_clients.insert(client_id);
                     }
                 }
@@ -59,18 +66,19 @@ pub fn host(
         }
         // let frame = capturer.get_next_frame().unwrap();
 
-        let bytes_amount = state
+        if let Ok(bytes_amount) = state
             .udp_socket
             .peek(&mut [0; std::mem::size_of::<ClientToHostNetworkMessage>()])
-            .unwrap();
-        if bytes_amount >= std::mem::size_of::<ClientToHostNetworkMessage>() {
-            state.udp_socket.recv(&mut network_buffer).unwrap();
-            let network_message = ClientToHostNetworkMessage::try_from(network_buffer);
-            if network_message.is_err() {
-                continue;
-            }
+        {
+            if bytes_amount >= std::mem::size_of::<ClientToHostNetworkMessage>() {
+                state.udp_socket.recv(&mut network_buffer).unwrap();
+                let network_message = ClientToHostNetworkMessage::try_from(network_buffer);
+                if network_message.is_err() {
+                    continue;
+                }
 
-            handle_network_message(network_message.unwrap(), &message_sender, &state);
+                handle_network_message(network_message.unwrap(), &message_sender, &state);
+            }
         }
     }
 

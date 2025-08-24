@@ -1,5 +1,5 @@
-#[derive(Debug, Eq, PartialEq, Hash)]
-pub struct ClientID(u16);
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub struct ClientID(pub u16);
 
 impl ClientID {
     pub fn generate() -> Self {

@@ -13,6 +13,7 @@ use libadwaita::{
     prelude::{AlertDialogExt, AlertDialogExtManual},
 };
 use std::{
+    rc::Rc,
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, Sender},
@@ -22,7 +23,7 @@ use std::{
 
 #[derive(Debug, Default, Clone)]
 struct HostState {
-    message_sender: Arc<Mutex<Option<Sender<UIToHostingMessage>>>>,
+    message_sender: Rc<Mutex<Option<Sender<UIToHostingMessage>>>>,
     message_receiver: Arc<Mutex<Option<Receiver<HostingToUIMessage>>>>,
     join_request_dialog: AlertDialog,
     parent_widget: Stack,
@@ -115,7 +116,7 @@ pub fn build_page() -> impl IsA<Widget> {
     stack.add_titled(&hosting_page, Some("hosting"), "Hosting");
 
     let mut state = HostState {
-        join_request_dialog,
+        join_request_dialog: join_request_dialog.clone(),
         ..Default::default()
     };
 
@@ -137,7 +138,7 @@ pub fn build_page() -> impl IsA<Widget> {
         sender_clone
             .lock()
             .unwrap()
-            .clone()
+            .as_ref()
             .unwrap()
             .send(UIToHostingMessage::Stop)
             .unwrap();
@@ -159,16 +160,17 @@ fn start_hosting(
     let (sender1, receiver1) = mpsc::channel::<UIToHostingMessage>();
 
     std::thread::spawn(move || crate::host::host(port, sender0, receiver1));
-    let state_clone = state.clone();
+    let mut state_clone = state.clone();
     libadwaita::glib::timeout_add_local(Duration::from_millis(100), move || {
-        listen_for_message(&state_clone);
+        listen_for_message(&mut state_clone);
         libadwaita::glib::ControlFlow::Continue
     });
     (sender1, receiver0)
 }
 
-fn listen_for_message(state: &HostState) {
-    let mut receiver = state.message_receiver.lock().unwrap();
+fn listen_for_message(state: &mut HostState) {
+    let receiver_clone = state.message_receiver.clone();
+    let mut receiver = receiver_clone.lock().unwrap();
     if receiver.is_none() {
         return;
     }
@@ -182,11 +184,35 @@ fn listen_for_message(state: &HostState) {
 
 fn handle_join_request(client_id: ClientID, state: &HostState) {
     println!("Showing join request dialog");
+    let message_sender = state
+        .message_sender
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .clone();
     state.join_request_dialog.clone().choose(
         &state.parent_widget,
         None::<&Cancellable>,
-        handle_join_request_respone,
+        move |choice| handle_join_request_respone(choice, message_sender, client_id),
     );
 }
 
-fn handle_join_request_respone(choice: GString) {}
+fn handle_join_request_respone(
+    choice: GString,
+    message_sender: Sender<UIToHostingMessage>,
+    client_id: ClientID,
+) {
+    dbg!(&message_sender);
+    if choice == "accept" {
+        println!("Sending accepted");
+        message_sender
+            .send(UIToHostingMessage::JoinRequestResponse(client_id, true))
+            .unwrap()
+    } else {
+        println!("Sending refused");
+        message_sender
+            .send(UIToHostingMessage::JoinRequestResponse(client_id, false))
+            .unwrap()
+    }
+}
