@@ -1,3 +1,4 @@
+use scap::frame::BGRxFrame;
 use std::{
     hash::Hash,
     net::{SocketAddr, UdpSocket},
@@ -20,12 +21,12 @@ impl ClientID {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Client {
     pub id: ClientID,
-    address: SocketAddr,
+    pub address: SocketAddr,
 }
 
 impl Client {
     pub fn send_message(&self, socket: &UdpSocket, message: HostToClientNetworkMessage) {
-        let buffer: [u8; std::mem::size_of::<HostToClientNetworkMessage>() + 1] = message.into();
+        let buffer: [u8; HOST_TO_CLIENT_MESSAGE_SIZE] = message.into();
         socket.send_to(&buffer, self.address).unwrap();
     }
 }
@@ -90,13 +91,28 @@ impl TryFrom<[u8; CLIENT_TO_HOST_MESSAGE_SIZE]> for ClientToHostNetworkMessage {
 #[derive(Debug)]
 pub enum HostToClientNetworkMessage {
     JoinRequestResponse(bool),
+    Frame(BGRxFrame),
 }
-pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = 2;
+pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = std::mem::size_of::<BGRxFrame>() + 1;
 
 impl From<HostToClientNetworkMessage> for [u8; HOST_TO_CLIENT_MESSAGE_SIZE] {
     fn from(value: HostToClientNetworkMessage) -> Self {
         match value {
-            HostToClientNetworkMessage::JoinRequestResponse(accepted) => [0, accepted as u8],
+            HostToClientNetworkMessage::JoinRequestResponse(accepted) => {
+                let mut buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
+                buffer[0] = 1;
+                buffer[1] = accepted as u8;
+                buffer
+            }
+            HostToClientNetworkMessage::Frame(frame) => {
+                let mut vec = frame.data.clone();
+                vec.push(2);
+                let mut buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
+                for i in 0..buffer.len() {
+                    buffer[i] = *vec.get(i).unwrap_or(&0);
+                }
+                buffer
+            }
         }
     }
 }
@@ -106,7 +122,7 @@ impl TryFrom<[u8; HOST_TO_CLIENT_MESSAGE_SIZE]> for HostToClientNetworkMessage {
     fn try_from(value: [u8; HOST_TO_CLIENT_MESSAGE_SIZE]) -> Result<Self, Self::Error> {
         let first_byte = value.first().ok_or(NetworkConversionError::EmptyBuffer)?;
         match first_byte {
-            0 => {
+            1 => {
                 let accepted = *value
                     .get(1)
                     .ok_or(NetworkConversionError::MalformedMessage)?;

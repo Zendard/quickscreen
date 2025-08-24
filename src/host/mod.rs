@@ -1,6 +1,9 @@
+use scap::{capturer::Capturer, frame::Frame};
+
 use self::network::ClientToHostNetworkMessage;
 use crate::host::network::{
-    CLIENT_TO_HOST_MESSAGE_SIZE, Client, ClientID, HostToClientNetworkMessage,
+    CLIENT_TO_HOST_MESSAGE_SIZE, Client, ClientID, HOST_TO_CLIENT_MESSAGE_SIZE,
+    HostToClientNetworkMessage,
 };
 use std::{
     collections::HashMap,
@@ -23,7 +26,7 @@ pub enum UIToHostingMessage {
 }
 
 struct HostingState {
-    // capturer: Capturer,
+    capturer: Capturer,
     udp_socket: UdpSocket,
     pending_clients: HashMap<ClientID, Client>,
     accepted_clients: HashMap<ClientID, Client>,
@@ -35,20 +38,21 @@ pub fn host(
     message_sender: Sender<HostingToUIMessage>,
     message_receiver: Receiver<UIToHostingMessage>,
 ) {
-    // let capturer = capture::new().unwrap();
+    let capturer = capture::new().unwrap();
     let udp_socket =
         UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).unwrap();
     let mut state = HostingState {
-        // capturer,
+        capturer,
         udp_socket,
         pending_clients: HashMap::new(),
         accepted_clients: HashMap::new(),
         refused_clients: HashMap::new(),
     };
 
-    // state.capturer.start_capture();
+    state.capturer.start_capture();
 
-    let mut network_buffer = [0; CLIENT_TO_HOST_MESSAGE_SIZE];
+    let mut client_to_host_buffer = [0; CLIENT_TO_HOST_MESSAGE_SIZE];
+    let mut host_to_client_buffer = [0; HOST_TO_CLIENT_MESSAGE_SIZE];
     state.udp_socket.set_nonblocking(true).unwrap();
 
     loop {
@@ -60,27 +64,49 @@ pub fn host(
                 }
             }
         }
-        // let frame = capturer.get_next_frame().unwrap();
+        let frame = state.capturer.get_next_frame().unwrap();
+        // match frame {
+        //     Frame::RGB(_) => println!("RGB frame"),
+        //     Frame::BGRA(_) => println!("BGRA frame"),
+        //     Frame::RGBx(_) => println!("RGBx frame"),
+        //     Frame::XBGR(_) => println!("XBGR frame"),
+        //     Frame::BGRx(_) => println!("BGRx frame"),
+        //     Frame::BGR0(_) => println!("BGR0 frame"),
+        //     Frame::YUVFrame(_) => println!("YUBFrame frame"),
+        // }
+        if let Frame::BGRx(frame) = frame {
+            host_to_client_buffer = HostToClientNetworkMessage::Frame(frame).into();
+            state.accepted_clients.values().for_each(|client| {
+                state
+                    .udp_socket
+                    .send_to(&host_to_client_buffer, client.address)
+                    .unwrap();
+                // println!("Sent frame packet to client {}", client.id.0);
+            });
+        }
 
-        if let Ok(bytes_amount) = state.udp_socket.peek(&mut [0; CLIENT_TO_HOST_MESSAGE_SIZE]) {
-            if bytes_amount >= CLIENT_TO_HOST_MESSAGE_SIZE {
-                let (_, origin) = state.udp_socket.recv_from(&mut network_buffer).unwrap();
-                let network_message = ClientToHostNetworkMessage::try_from(network_buffer);
-                if network_message.is_err() {
-                    continue;
-                }
-
-                handle_network_message(
-                    network_message.unwrap(),
-                    origin,
-                    &message_sender,
-                    &mut state,
-                );
+        if let Ok(bytes_amount) = state.udp_socket.peek(&mut [0; CLIENT_TO_HOST_MESSAGE_SIZE])
+            && bytes_amount >= CLIENT_TO_HOST_MESSAGE_SIZE
+        {
+            let (_, origin) = state
+                .udp_socket
+                .recv_from(&mut client_to_host_buffer)
+                .unwrap();
+            let network_message = ClientToHostNetworkMessage::try_from(client_to_host_buffer);
+            if network_message.is_err() {
+                continue;
             }
+
+            handle_network_message(
+                network_message.unwrap(),
+                origin,
+                &message_sender,
+                &mut state,
+            );
         }
     }
 
-    // state.capturer.stop_capture();
+    state.capturer.stop_capture();
     println!("Stopped hosting");
 }
 
