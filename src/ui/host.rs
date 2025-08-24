@@ -115,8 +115,9 @@ pub fn build_page() -> impl IsA<Widget> {
     stack.add_titled(&host_page, Some("host"), "Host");
     stack.add_titled(&hosting_page, Some("hosting"), "Hosting");
 
-    let mut state = HostState {
+    let state = HostState {
         join_request_dialog: join_request_dialog.clone(),
+        parent_widget: stack.clone(),
         ..Default::default()
     };
 
@@ -144,7 +145,6 @@ pub fn build_page() -> impl IsA<Widget> {
             .unwrap();
         stack_clone.set_visible_child(&host_page);
     });
-    state.parent_widget = stack.clone();
 
     stack
 }
@@ -160,6 +160,7 @@ fn start_hosting(
     let (sender1, receiver1) = mpsc::channel::<UIToHostingMessage>();
 
     std::thread::spawn(move || crate::host::host(port, sender0, receiver1));
+
     let mut state_clone = state.clone();
     libadwaita::glib::timeout_add_local(Duration::from_millis(100), move || {
         listen_for_message(&mut state_clone);

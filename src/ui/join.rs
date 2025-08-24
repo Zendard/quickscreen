@@ -1,9 +1,12 @@
 use libadwaita::{
+    AlertDialog,
+    gio::Cancellable,
     glib::object::{IsA, ObjectExt},
     gtk::{
         Align, Button, Entry, EntryBuffer, Label, Stack, Widget,
         prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
     },
+    prelude::{AlertDialogExt, AlertDialogExtManual},
 };
 use std::{
     rc::Rc,
@@ -12,14 +15,17 @@ use std::{
         Mutex,
         mpsc::{self, Receiver, Sender},
     },
+    time::Duration,
 };
 
 use crate::join::{JoinedToUIMessage, UIToJoinedMessage};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct JoinState {
     message_sender: Rc<Mutex<Option<Sender<UIToJoinedMessage>>>>,
-    message_receiver: Mutex<Option<Receiver<JoinedToUIMessage>>>,
+    message_receiver: Rc<Mutex<Option<Receiver<JoinedToUIMessage>>>>,
+    join_request_response_dialog: AlertDialog,
+    parent_widget: Stack,
 }
 
 pub fn build_page() -> impl IsA<Widget> {
@@ -93,6 +99,26 @@ pub fn build_page() -> impl IsA<Widget> {
     join_page.append(&join_button);
 
     let title = Label::builder()
+        .label("Requesting to join...")
+        .css_classes(["title-1"])
+        .build();
+
+    let cancel_button = Button::builder()
+        .label("Cancel")
+        .css_classes(["destructive-action"])
+        .width_request(200)
+        .halign(Align::Center)
+        .build();
+
+    let requesting_page = libadwaita::gtk::Box::builder()
+        .orientation(libadwaita::gtk::Orientation::Vertical)
+        .valign(Align::Center)
+        .spacing(16)
+        .build();
+    requesting_page.append(&title);
+    requesting_page.append(&cancel_button);
+
+    let title = Label::builder()
         .label("Joined")
         .css_classes(["title-1"])
         .build();
@@ -104,6 +130,14 @@ pub fn build_page() -> impl IsA<Widget> {
         .halign(Align::Center)
         .build();
 
+    let join_request_response_dialog = AlertDialog::builder()
+        .title("Join request response")
+        .heading("Unknown response")
+        .body("You were unknown")
+        .close_response("ok")
+        .build();
+    join_request_response_dialog.add_response("ok", "Ok");
+
     let joined_page = libadwaita::gtk::Box::builder()
         .orientation(libadwaita::gtk::Orientation::Vertical)
         .valign(Align::Center)
@@ -113,13 +147,22 @@ pub fn build_page() -> impl IsA<Widget> {
     joined_page.append(&leave_button);
 
     let stack = Stack::new();
-    stack.add_named(&join_page, Some("join-page"));
-    stack.add_named(&joined_page, Some("joined-page"));
+    stack.add_titled(&join_page, Some("join-page"), "Join");
+    stack.add_titled(
+        &requesting_page,
+        Some("requesting-page"),
+        "Requesting to join...",
+    );
+    stack.add_titled(&joined_page, Some("joined-page"), "Joined");
 
-    let state = JoinState::default();
+    let state = JoinState {
+        join_request_response_dialog,
+        parent_widget: stack.clone(),
+        ..Default::default()
+    };
 
     let stack_clone = stack.clone();
-    let sender_clone = state.message_sender.clone();
+    let state_clone = state.clone();
     join_button.connect_clicked(move |_| {
         if port_buffer.text().len() < 4
             || std::net::IpAddr::from_str(&address_buffer.text()).is_err()
@@ -129,10 +172,11 @@ pub fn build_page() -> impl IsA<Widget> {
         let (sender, receiver) = start_joining(
             address_buffer.text().to_string(),
             port_buffer.text().to_string(),
+            &state_clone,
         );
-        *sender_clone.lock().unwrap() = Some(sender);
-        *state.message_receiver.lock().unwrap() = Some(receiver);
-        stack_clone.set_visible_child(&joined_page);
+        *state_clone.message_sender.lock().unwrap() = Some(sender);
+        *state_clone.message_receiver.lock().unwrap() = Some(receiver);
+        stack_clone.set_visible_child(&requesting_page);
     });
 
     let stack_clone = stack.clone();
@@ -154,6 +198,7 @@ pub fn build_page() -> impl IsA<Widget> {
 fn start_joining(
     address_string: String,
     port_string: String,
+    state: &JoinState,
 ) -> (Sender<UIToJoinedMessage>, Receiver<JoinedToUIMessage>) {
     let address = std::net::IpAddr::from_str(&address_string).unwrap();
     let port: u16 = port_string.parse().unwrap();
@@ -163,5 +208,60 @@ fn start_joining(
     let (sender1, receiver1) = mpsc::channel::<UIToJoinedMessage>();
 
     std::thread::spawn(move || crate::join::join(address, port, sender0, receiver1));
+
+    let mut state_clone = state.clone();
+    libadwaita::glib::timeout_add_local(Duration::from_millis(100), move || {
+        listen_for_message(&mut state_clone);
+        libadwaita::glib::ControlFlow::Continue
+    });
     (sender1, receiver0)
+}
+
+fn listen_for_message(state: &mut JoinState) {
+    let receiver_clone = state.message_receiver.clone();
+    let mut receiver = receiver_clone.lock().unwrap();
+    if receiver.is_none() {
+        return;
+    }
+    let receiver = receiver.as_mut().unwrap();
+    if let Ok(message) = receiver.try_recv() {
+        match message {
+            JoinedToUIMessage::JoinRequestResponse(accepted) => {
+                handle_join_request_response(accepted, state)
+            }
+        }
+    }
+}
+
+fn handle_join_request_response(accepted: bool, state: &JoinState) {
+    state.join_request_response_dialog.clone().choose(
+        &state.parent_widget,
+        None::<&Cancellable>,
+        |_| {},
+    );
+    if accepted {
+        state
+            .join_request_response_dialog
+            .set_heading(Some("Accepted"));
+        state
+            .join_request_response_dialog
+            .set_body("You were accepted");
+        state.parent_widget.set_visible_child_name("joined-page");
+    } else {
+        state
+            .join_request_response_dialog
+            .set_heading(Some("Refused"));
+        state
+            .join_request_response_dialog
+            .set_body("You were refused");
+        state
+            .message_sender
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .send(UIToJoinedMessage::Leave)
+            .unwrap();
+        state.parent_widget.set_visible_child_name("join-page");
+    }
 }

@@ -12,7 +12,7 @@ impl ClientID {
         Self(id)
     }
 
-    pub fn to_client(&self, address: SocketAddr) -> Client {
+    pub fn as_client(&self, address: SocketAddr) -> Client {
         Client { id: *self, address }
     }
 }

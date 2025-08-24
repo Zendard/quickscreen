@@ -109,7 +109,7 @@ fn handle_join_request(
 
     state
         .pending_clients
-        .insert(client_id, client_id.to_client(client_address));
+        .insert(client_id, client_id.as_client(client_address));
 
     ui_sender
         .send(HostingToUIMessage::JoinRequest(client_id))
