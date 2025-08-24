@@ -49,11 +49,9 @@ pub fn host(
 
     loop {
         if let Ok(message) = message_receiver.try_recv() {
-            dbg!(&message);
             match message {
                 UIToHostingMessage::Stop => break,
                 UIToHostingMessage::JoinRequestResponse(client_id, accepted) => {
-                    println!("Received join request response");
                     if accepted {
                         println!("Client {} accepted", &client_id.0);
                         state.accepted_clients.insert(client_id);

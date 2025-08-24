@@ -203,14 +203,11 @@ fn handle_join_request_respone(
     message_sender: Sender<UIToHostingMessage>,
     client_id: ClientID,
 ) {
-    dbg!(&message_sender);
     if choice == "accept" {
-        println!("Sending accepted");
         message_sender
             .send(UIToHostingMessage::JoinRequestResponse(client_id, true))
             .unwrap()
     } else {
-        println!("Sending refused");
         message_sender
             .send(UIToHostingMessage::JoinRequestResponse(client_id, false))
             .unwrap()
