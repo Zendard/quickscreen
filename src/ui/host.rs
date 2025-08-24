@@ -1,23 +1,31 @@
-use crate::host::{HostingToUIMessage, UIToHostingMessage};
+use crate::host::{HostingToUIMessage, UIToHostingMessage, network::ClientID};
 use libadwaita::{
-    glib::object::{IsA, ObjectExt},
+    AlertDialog,
+    gio::Cancellable,
+    glib::{
+        GString,
+        object::{IsA, ObjectExt},
+    },
     gtk::{
         Align, Button, Entry, EntryBuffer, Label, Stack, Widget,
         prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
     },
+    prelude::AlertDialogExtManual,
 };
 use std::{
-    rc::Rc,
     sync::{
-        Mutex,
+        Arc, Mutex,
         mpsc::{self, Receiver, Sender},
     },
+    time::Duration,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct HostState {
-    message_sender: Rc<Mutex<Option<Sender<UIToHostingMessage>>>>,
-    message_receiver: Mutex<Option<Receiver<HostingToUIMessage>>>,
+    message_sender: Arc<Mutex<Option<Sender<UIToHostingMessage>>>>,
+    message_receiver: Arc<Mutex<Option<Receiver<HostingToUIMessage>>>>,
+    join_request_dialog: AlertDialog,
+    parent_widget: Stack,
 }
 
 pub fn build_page() -> impl IsA<Widget> {
@@ -81,6 +89,13 @@ pub fn build_page() -> impl IsA<Widget> {
         .halign(Align::Center)
         .build();
 
+    let join_request_dialog = AlertDialog::builder()
+        .heading("Join request")
+        .body("Client unknown wants to join")
+        .close_response("Refuse")
+        .default_response("Accept")
+        .build();
+
     let hosting_page = libadwaita::gtk::Box::builder()
         .orientation(libadwaita::gtk::Orientation::Vertical)
         .valign(Align::Center)
@@ -93,17 +108,20 @@ pub fn build_page() -> impl IsA<Widget> {
     stack.add_titled(&host_page, Some("host"), "Host");
     stack.add_titled(&hosting_page, Some("hosting"), "Hosting");
 
-    let state = HostState::default();
+    let mut state = HostState {
+        join_request_dialog,
+        ..Default::default()
+    };
 
     let stack_clone = stack.clone();
-    let sender_clone = state.message_sender.clone();
+    let state_clone = state.clone();
     host_button.connect_clicked(move |_| {
         if port_buffer.text().len() < 4 {
             return;
         }
-        let (sender, receiver) = start_hosting(port_buffer.text().to_string());
-        *sender_clone.lock().unwrap() = Some(sender);
-        *state.message_receiver.lock().unwrap() = Some(receiver);
+        let (sender, receiver) = start_hosting(port_buffer.text().to_string(), &state_clone);
+        *state_clone.message_sender.lock().unwrap() = Some(sender);
+        *state_clone.message_receiver.lock().unwrap() = Some(receiver);
         stack_clone.set_visible_child(&hosting_page);
     });
 
@@ -119,12 +137,14 @@ pub fn build_page() -> impl IsA<Widget> {
             .unwrap();
         stack_clone.set_visible_child(&host_page);
     });
+    state.parent_widget = stack.clone();
 
     stack
 }
 
 fn start_hosting(
     port_string: String,
+    state: &HostState,
 ) -> (Sender<UIToHostingMessage>, Receiver<HostingToUIMessage>) {
     let port: u16 = port_string.parse().unwrap();
     println!("Hosting on port {}", port_string);
@@ -133,5 +153,34 @@ fn start_hosting(
     let (sender1, receiver1) = mpsc::channel::<UIToHostingMessage>();
 
     std::thread::spawn(move || crate::host::host(port, sender0, receiver1));
+    let state_clone = state.clone();
+    libadwaita::glib::timeout_add_local(Duration::from_millis(100), move || {
+        listen_for_message(&state_clone);
+        libadwaita::glib::ControlFlow::Continue
+    });
     (sender1, receiver0)
 }
+
+fn listen_for_message(state: &HostState) {
+    let mut receiver = state.message_receiver.lock().unwrap();
+    if receiver.is_none() {
+        return;
+    }
+    let receiver = receiver.as_mut().unwrap();
+    if let Ok(message) = receiver.try_recv() {
+        match message {
+            HostingToUIMessage::JoinRequest(client_id) => handle_join_request(client_id, state),
+        }
+    }
+}
+
+fn handle_join_request(client_id: ClientID, state: &HostState) {
+    println!("Showing join request dialog");
+    state.join_request_dialog.clone().choose(
+        &state.parent_widget,
+        None::<&Cancellable>,
+        handle_join_request_respone,
+    );
+}
+
+fn handle_join_request_respone(choice: GString) {}

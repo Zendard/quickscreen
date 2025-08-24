@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub struct ClientID(u16);
 
 impl ClientID {
@@ -13,12 +13,12 @@ pub enum ClientToHostNetworkMessage {
     JoinRequest(ClientID),
 }
 
-impl Into<[u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1]>
-    for ClientToHostNetworkMessage
+impl From<ClientToHostNetworkMessage>
+    for [u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1]
 {
-    fn into(self) -> [u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1] {
-        match self {
-            Self::JoinRequest(id) => [1, id.0 as u8, (id.0 >> 8) as u8],
+    fn from(value: ClientToHostNetworkMessage) -> Self {
+        match value {
+            ClientToHostNetworkMessage::JoinRequest(id) => [1, id.0 as u8, (id.0 >> 8) as u8],
         }
     }
 }
@@ -33,7 +33,7 @@ pub enum NetworkConversionError {
 impl TryFrom<[u8; 3]> for ClientToHostNetworkMessage {
     type Error = NetworkConversionError;
     fn try_from(value: [u8; 3]) -> Result<Self, Self::Error> {
-        let first_byte = value.get(0).ok_or(NetworkConversionError::EmptyBuffer)?;
+        let first_byte = value.first().ok_or(NetworkConversionError::EmptyBuffer)?;
         match first_byte {
             1 => {
                 let id = *value
