@@ -33,14 +33,15 @@ impl Client {
 #[derive(Debug)]
 pub enum ClientToHostNetworkMessage {
     JoinRequest(ClientID),
+    Left(ClientID),
 }
+pub const CLIENT_TO_HOST_MESSAGE_SIZE: usize = 3;
 
-impl From<ClientToHostNetworkMessage>
-    for [u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1]
-{
+impl From<ClientToHostNetworkMessage> for [u8; CLIENT_TO_HOST_MESSAGE_SIZE] {
     fn from(value: ClientToHostNetworkMessage) -> Self {
         match value {
             ClientToHostNetworkMessage::JoinRequest(id) => [1, id.0 as u8, (id.0 >> 8) as u8],
+            ClientToHostNetworkMessage::Left(id) => [2, id.0 as u8, (id.0 >> 8) as u8],
         }
     }
 }
@@ -52,13 +53,9 @@ pub enum NetworkConversionError {
     MalformedMessage,
 }
 
-impl TryFrom<[u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1]>
-    for ClientToHostNetworkMessage
-{
+impl TryFrom<[u8; CLIENT_TO_HOST_MESSAGE_SIZE]> for ClientToHostNetworkMessage {
     type Error = NetworkConversionError;
-    fn try_from(
-        value: [u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1],
-    ) -> Result<Self, Self::Error> {
+    fn try_from(value: [u8; CLIENT_TO_HOST_MESSAGE_SIZE]) -> Result<Self, Self::Error> {
         let first_byte = value.first().ok_or(NetworkConversionError::EmptyBuffer)?;
         match first_byte {
             1 => {
@@ -73,6 +70,18 @@ impl TryFrom<[u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1]>
                         << 8;
                 Ok(Self::JoinRequest(ClientID(id)))
             }
+            2 => {
+                let id = *value
+                    .get(1)
+                    .ok_or(NetworkConversionError::MalformedMessage)?
+                    as u16
+                    | (*value
+                        .get(2)
+                        .ok_or(NetworkConversionError::MalformedMessage)?
+                        as u16)
+                        << 8;
+                Ok(Self::Left(ClientID(id)))
+            }
             _ => Err(NetworkConversionError::UnrecognizedSignature),
         }
     }
@@ -82,10 +91,9 @@ impl TryFrom<[u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1]>
 pub enum HostToClientNetworkMessage {
     JoinRequestResponse(bool),
 }
+pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = 2;
 
-impl From<HostToClientNetworkMessage>
-    for [u8; std::mem::size_of::<HostToClientNetworkMessage>() + 1]
-{
+impl From<HostToClientNetworkMessage> for [u8; HOST_TO_CLIENT_MESSAGE_SIZE] {
     fn from(value: HostToClientNetworkMessage) -> Self {
         match value {
             HostToClientNetworkMessage::JoinRequestResponse(accepted) => [0, accepted as u8],
@@ -93,13 +101,9 @@ impl From<HostToClientNetworkMessage>
     }
 }
 
-impl TryFrom<[u8; std::mem::size_of::<HostToClientNetworkMessage>() + 1]>
-    for HostToClientNetworkMessage
-{
+impl TryFrom<[u8; HOST_TO_CLIENT_MESSAGE_SIZE]> for HostToClientNetworkMessage {
     type Error = NetworkConversionError;
-    fn try_from(
-        value: [u8; std::mem::size_of::<HostToClientNetworkMessage>() + 1],
-    ) -> Result<Self, Self::Error> {
+    fn try_from(value: [u8; HOST_TO_CLIENT_MESSAGE_SIZE]) -> Result<Self, Self::Error> {
         let first_byte = value.first().ok_or(NetworkConversionError::EmptyBuffer)?;
         match first_byte {
             0 => {

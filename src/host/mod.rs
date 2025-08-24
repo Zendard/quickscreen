@@ -1,5 +1,7 @@
 use self::network::ClientToHostNetworkMessage;
-use crate::host::network::{Client, ClientID, HostToClientNetworkMessage};
+use crate::host::network::{
+    CLIENT_TO_HOST_MESSAGE_SIZE, Client, ClientID, HostToClientNetworkMessage,
+};
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
@@ -11,6 +13,7 @@ pub mod network;
 
 pub enum HostingToUIMessage {
     JoinRequest(ClientID),
+    ClientLeft(ClientID),
 }
 
 #[derive(Debug)]
@@ -45,7 +48,7 @@ pub fn host(
 
     // state.capturer.start_capture();
 
-    let mut network_buffer = [0; std::mem::size_of::<ClientToHostNetworkMessage>() + 1];
+    let mut network_buffer = [0; CLIENT_TO_HOST_MESSAGE_SIZE];
     state.udp_socket.set_nonblocking(true).unwrap();
 
     loop {
@@ -59,11 +62,8 @@ pub fn host(
         }
         // let frame = capturer.get_next_frame().unwrap();
 
-        if let Ok(bytes_amount) = state
-            .udp_socket
-            .peek(&mut [0; std::mem::size_of::<ClientToHostNetworkMessage>()])
-        {
-            if bytes_amount >= std::mem::size_of::<ClientToHostNetworkMessage>() {
+        if let Ok(bytes_amount) = state.udp_socket.peek(&mut [0; CLIENT_TO_HOST_MESSAGE_SIZE]) {
+            if bytes_amount >= CLIENT_TO_HOST_MESSAGE_SIZE {
                 let (_, origin) = state.udp_socket.recv_from(&mut network_buffer).unwrap();
                 let network_message = ClientToHostNetworkMessage::try_from(network_buffer);
                 if network_message.is_err() {
@@ -93,6 +93,9 @@ fn handle_network_message(
     match message {
         ClientToHostNetworkMessage::JoinRequest(client_id) => {
             handle_join_request(client_id, origin, ui_sender, state)
+        }
+        ClientToHostNetworkMessage::Left(client_id) => {
+            handle_client_left(client_id, ui_sender, state)
         }
     }
 }
@@ -129,4 +132,16 @@ fn handle_join_request_response(client_id: ClientID, accepted: bool, state: &mut
         &state.udp_socket,
         HostToClientNetworkMessage::JoinRequestResponse(accepted),
     );
+}
+
+fn handle_client_left(
+    client_id: ClientID,
+    message_sender: &Sender<HostingToUIMessage>,
+    state: &mut HostingState,
+) {
+    println!("Client {} left", client_id.0);
+    state.accepted_clients.remove(&client_id);
+    message_sender
+        .send(HostingToUIMessage::ClientLeft(client_id))
+        .unwrap()
 }

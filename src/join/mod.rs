@@ -1,4 +1,6 @@
-use crate::host::network::{ClientID, ClientToHostNetworkMessage, HostToClientNetworkMessage};
+use crate::host::network::{
+    CLIENT_TO_HOST_MESSAGE_SIZE, ClientID, ClientToHostNetworkMessage, HostToClientNetworkMessage,
+};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     sync::mpsc::{Receiver, Sender},
@@ -22,7 +24,7 @@ pub fn join(
     udp_socket.connect(SocketAddr::new(address, port)).unwrap();
 
     let id = ClientID::generate();
-    let network_buffer: [u8; std::mem::size_of::<ClientToHostNetworkMessage>() + 1] =
+    let network_buffer: [u8; CLIENT_TO_HOST_MESSAGE_SIZE] =
         ClientToHostNetworkMessage::JoinRequest(id).into();
     udp_socket.send(&network_buffer).unwrap();
 
@@ -51,6 +53,10 @@ pub fn join(
         }
     }
     println!("Leaving...");
+
+    let network_buffer: [u8; CLIENT_TO_HOST_MESSAGE_SIZE] =
+        ClientToHostNetworkMessage::Left(id).into();
+    udp_socket.send(&network_buffer).unwrap();
 }
 
 fn handle_network_message(
@@ -65,6 +71,11 @@ fn handle_network_message(
 }
 
 fn handle_join_request_response(accepted: bool, message_sender: &Sender<JoinedToUIMessage>) {
+    if accepted {
+        println!("We were accepted")
+    } else {
+        println!("We were refused")
+    }
     message_sender
         .send(JoinedToUIMessage::JoinRequestResponse(accepted))
         .unwrap();

@@ -181,6 +181,19 @@ pub fn build_page() -> impl IsA<Widget> {
 
     let stack_clone = stack.clone();
     let sender_clone = state.message_sender.clone();
+    cancel_button.connect_clicked(move |_| {
+        sender_clone
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap()
+            .send(UIToJoinedMessage::Leave)
+            .unwrap();
+        stack_clone.set_visible_child_name("join-page");
+    });
+
+    let sender_clone = state.message_sender.clone();
+    let stack_clone = stack.clone();
     leave_button.connect_clicked(move |_| {
         sender_clone
             .lock()
@@ -189,7 +202,7 @@ pub fn build_page() -> impl IsA<Widget> {
             .unwrap()
             .send(UIToJoinedMessage::Leave)
             .unwrap();
-        stack_clone.set_visible_child(&join_page);
+        stack_clone.set_visible_child_name("join-page");
     });
 
     stack

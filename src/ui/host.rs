@@ -10,7 +10,7 @@ use libadwaita::{
         Align, Button, Entry, EntryBuffer, Label, Stack, Widget,
         prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
     },
-    prelude::{AlertDialogExt, AlertDialogExtManual},
+    prelude::{AdwDialogExt, AlertDialogExt, AlertDialogExtManual},
 };
 use std::{
     rc::Rc,
@@ -26,6 +26,7 @@ struct HostState {
     message_sender: Rc<Mutex<Option<Sender<UIToHostingMessage>>>>,
     message_receiver: Arc<Mutex<Option<Receiver<HostingToUIMessage>>>>,
     join_request_dialog: AlertDialog,
+    info_dialog: AlertDialog,
     parent_widget: Stack,
 }
 
@@ -120,6 +121,7 @@ pub fn build_page() -> impl IsA<Widget> {
         parent_widget: stack.clone(),
         ..Default::default()
     };
+    state.info_dialog.add_response("ok", "Ok");
 
     let stack_clone = stack.clone();
     let state_clone = state.clone();
@@ -179,6 +181,7 @@ fn listen_for_message(state: &mut HostState) {
     if let Ok(message) = receiver.try_recv() {
         match message {
             HostingToUIMessage::JoinRequest(client_id) => handle_join_request(client_id, state),
+            HostingToUIMessage::ClientLeft(client_id) => handle_client_left(client_id, state),
         }
     }
 }
@@ -212,4 +215,16 @@ fn handle_join_request_respone(
             .send(UIToHostingMessage::JoinRequestResponse(client_id, false))
             .unwrap()
     }
+}
+
+fn handle_client_left(client_id: ClientID, state: &HostState) {
+    state.info_dialog.set_title("Client left");
+    state.info_dialog.set_heading(Some("Client left"));
+    state
+        .info_dialog
+        .set_body(&format!("Client {} left", client_id.0));
+    state
+        .info_dialog
+        .clone()
+        .choose(&state.parent_widget, None::<&Cancellable>, |_| {});
 }
