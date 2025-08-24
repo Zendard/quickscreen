@@ -10,7 +10,7 @@ use libadwaita::{
         Align, Button, Entry, EntryBuffer, Label, Stack, Widget,
         prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
     },
-    prelude::AlertDialogExtManual,
+    prelude::{AlertDialogExt, AlertDialogExtManual},
 };
 use std::{
     sync::{
@@ -90,11 +90,17 @@ pub fn build_page() -> impl IsA<Widget> {
         .build();
 
     let join_request_dialog = AlertDialog::builder()
+        .title("Join request")
         .heading("Join request")
         .body("Client unknown wants to join")
-        .close_response("Refuse")
-        .default_response("Accept")
+        .close_response("refuse")
+        .default_response("accept")
         .build();
+    join_request_dialog.add_responses(&[("refuse", "Refuse"), ("accept", "Accept")]);
+    join_request_dialog
+        .set_response_appearance("refuse", libadwaita::ResponseAppearance::Destructive);
+    join_request_dialog
+        .set_response_appearance("accept", libadwaita::ResponseAppearance::Suggested);
 
     let hosting_page = libadwaita::gtk::Box::builder()
         .orientation(libadwaita::gtk::Orientation::Vertical)
