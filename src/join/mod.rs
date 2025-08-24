@@ -1,5 +1,6 @@
 use crate::host::network::{
     ClientID, ClientToHostNetworkMessage, HOST_TO_CLIENT_MESSAGE_SIZE, HostToClientNetworkMessage,
+    LargeSend, MAX_UDP_SEND_SIZE,
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
@@ -29,7 +30,7 @@ pub fn join(
 
     udp_socket.set_nonblocking(true).unwrap();
 
-    let mut network_buffer = Vec::with_capacity(HOST_TO_CLIENT_MESSAGE_SIZE);
+    let network_buffer = &mut [0; HOST_TO_CLIENT_MESSAGE_SIZE];
     loop {
         if let Ok(message) = message_receiver.try_recv() {
             match message {
@@ -37,17 +38,23 @@ pub fn join(
             }
         }
 
-        if let Ok(bytes_amount) =
-            udp_socket.peek(&mut [0; std::mem::size_of::<HostToClientNetworkMessage>()])
-            && bytes_amount >= std::mem::size_of::<HostToClientNetworkMessage>()
-        {
-            udp_socket.recv(&mut network_buffer).unwrap();
-            let network_message = HostToClientNetworkMessage::try_from(network_buffer.as_slice());
-            if network_message.is_err() {
-                continue;
+        let network_result = udp_socket.peek(network_buffer);
+        if let Ok(bytes_amount) = network_result {
+            if network_buffer.first() == Some(&2) {
+                let message = udp_socket
+                    .recv_large()
+                    .unwrap()
+                    .as_slice()
+                    .try_into()
+                    .unwrap();
+                handle_network_message(message, &message_sender);
+            } else {
+                let message_result = network_buffer.as_slice().try_into();
+                if let Ok(network_message) = message_result {
+                    udp_socket.recv(&mut []).unwrap();
+                    handle_network_message(network_message, &message_sender);
+                }
             }
-
-            handle_network_message(network_message.unwrap(), &message_sender);
         }
     }
     println!("Leaving...");

@@ -60,12 +60,6 @@ pub fn host(
         Frame::YUVFrame(_) => println!("YUBFrame frame"),
     }
 
-    if let Frame::RGB(frame) = frame {
-        dbg!(frame.width);
-        dbg!(frame.height);
-        dbg!(frame.data.len());
-    }
-
     let client_to_host_buffer = &mut [0; CLIENT_TO_HOST_MESSAGE_SIZE];
     state.udp_socket.set_nonblocking(true).unwrap();
 
@@ -89,11 +83,8 @@ pub fn host(
         });
 
         let network_result = state.udp_socket.peek_from(client_to_host_buffer);
-
         if let Ok((_, origin)) = network_result {
-            dbg!(&client_to_host_buffer);
             let message_result = client_to_host_buffer.as_slice().try_into();
-            dbg!(&message_result);
             if let Ok(network_message) = message_result {
                 state.udp_socket.recv(&mut []).unwrap();
                 handle_network_message(network_message, origin, &message_sender, &mut state);

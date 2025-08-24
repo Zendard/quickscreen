@@ -93,14 +93,21 @@ pub enum HostToClientNetworkMessage {
     JoinRequestResponse(bool),
     Frame(NetworkFrame),
 }
-pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = 1920 * 1080 * 3 + 1;
+pub const HOST_TO_CLIENT_MESSAGE_SIZE: usize = MAX_UDP_SEND_SIZE;
 
 impl From<HostToClientNetworkMessage> for Vec<u8> {
     fn from(value: HostToClientNetworkMessage) -> Self {
         match value {
-            HostToClientNetworkMessage::JoinRequestResponse(accepted) => vec![0, (accepted as u8)],
+            HostToClientNetworkMessage::JoinRequestResponse(accepted) => vec![1, (accepted as u8)],
             HostToClientNetworkMessage::Frame(frame) => {
-                frame.data.iter().flat_map(|i| [i.0, i.1, i.2]).collect()
+                let mut frame_vec: Vec<u8> =
+                    frame.data.iter().flat_map(|i| [i.0, i.1, i.2]).collect();
+                let mut output = Vec::with_capacity(frame.data.len() + 2);
+                output.push(2);
+                let amount_of_sends = (frame_vec.len() + 2) / MAX_UDP_SEND_SIZE;
+                output.push(amount_of_sends.try_into().unwrap());
+                output.append(&mut frame_vec);
+                output
             }
         }
     }
@@ -115,8 +122,17 @@ impl TryFrom<&[u8]> for HostToClientNetworkMessage {
                 let accepted = *value
                     .get(1)
                     .ok_or(NetworkConversionError::MalformedMessage)?;
-                dbg!(accepted);
                 Ok(Self::JoinRequestResponse(accepted != 0))
+            }
+            2 => {
+                let mut data = Vec::with_capacity(HOST_TO_CLIENT_MESSAGE_SIZE);
+                let mut value = value;
+                value.split_off_first();
+                value.split_off_first();
+                for i in 0..value.len() / 3 {
+                    data.push((value[i * 3], value[i * 3 + 1], value[i * 3 + 2]));
+                }
+                Ok(Self::Frame(NetworkFrame { data }))
             }
             _ => Err(NetworkConversionError::UnrecognizedSignature),
         }
@@ -129,9 +145,11 @@ pub trait LargeSend {
         bytes: &[u8],
         address: SocketAddr,
     ) -> Result<(), Box<dyn std::error::Error>>;
+
+    fn recv_large(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
 }
 
-const MAX_UDP_SEND_SIZE: usize = 65507;
+pub const MAX_UDP_SEND_SIZE: usize = 65507;
 impl LargeSend for UdpSocket {
     fn send_to_large(
         &self,
@@ -150,5 +168,26 @@ impl LargeSend for UdpSocket {
         self.send_to(remaining_slice, address)?;
 
         Ok(())
+    }
+    fn recv_large(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut output = Vec::with_capacity(MAX_UDP_SEND_SIZE);
+        let network_buffer = &mut [0; MAX_UDP_SEND_SIZE];
+        let mut bytes_amount = 0;
+        while bytes_amount == 0 {
+            bytes_amount = self.recv(network_buffer).unwrap_or(0);
+        }
+        output.append(&mut network_buffer.to_vec());
+
+        let mut remaining_parts = network_buffer[1] + 1;
+        while remaining_parts > 0 {
+            let bytes_amount = self.recv(network_buffer).unwrap_or(0);
+            if bytes_amount == 0 {
+                continue;
+            }
+
+            output.append(&mut network_buffer.to_vec());
+            remaining_parts -= 1;
+        }
+        Ok(output)
     }
 }
