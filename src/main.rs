@@ -4,8 +4,11 @@ use libadwaita::{
     gtk::prelude::GtkWindowExt,
 };
 
+pub mod encoding;
 mod host;
 mod join;
+#[cfg(test)]
+mod tests;
 mod ui;
 
 fn main() {
