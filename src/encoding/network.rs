@@ -1,8 +1,9 @@
-use crate::host::capture::NetworkFrame;
 use std::{
     hash::Hash,
     net::{SocketAddr, UdpSocket},
 };
+
+use crate::encoding::NetworkFrame;
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct ClientID(pub u16);
@@ -99,14 +100,12 @@ impl From<HostToClientNetworkMessage> for Vec<u8> {
     fn from(value: HostToClientNetworkMessage) -> Self {
         match value {
             HostToClientNetworkMessage::JoinRequestResponse(accepted) => vec![1, (accepted as u8)],
-            HostToClientNetworkMessage::Frame(frame) => {
-                let mut frame_vec: Vec<u8> =
-                    frame.data.iter().flat_map(|i| [i.0, i.1, i.2]).collect();
+            HostToClientNetworkMessage::Frame(mut frame) => {
                 let mut output = Vec::with_capacity(frame.data.len() + 2);
                 output.push(2);
-                let amount_of_sends = (frame_vec.len() + 2) / MAX_UDP_SEND_SIZE;
+                let amount_of_sends = ((frame.data.len() + 2) / MAX_UDP_SEND_SIZE) + 1;
                 output.push(amount_of_sends.try_into().unwrap());
-                output.append(&mut frame_vec);
+                output.append(&mut frame.data);
                 output
             }
         }
@@ -125,14 +124,12 @@ impl TryFrom<&[u8]> for HostToClientNetworkMessage {
                 Ok(Self::JoinRequestResponse(accepted != 0))
             }
             2 => {
-                let mut data = Vec::with_capacity(HOST_TO_CLIENT_MESSAGE_SIZE);
                 let mut value = value;
                 value.split_off_first();
                 value.split_off_first();
-                for i in 0..value.len() / 3 {
-                    data.push((value[i * 3], value[i * 3 + 1], value[i * 3 + 2]));
-                }
-                Ok(Self::Frame(NetworkFrame { data }))
+                Ok(Self::Frame(NetworkFrame {
+                    data: value.to_vec(),
+                }))
             }
             _ => Err(NetworkConversionError::UnrecognizedSignature),
         }
@@ -157,11 +154,13 @@ impl LargeSend for UdpSocket {
         address: SocketAddr,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let amount_of_slices = bytes.len() / MAX_UDP_SEND_SIZE;
+        dbg!(&amount_of_slices);
 
         let mut remaining_slice = bytes;
 
         for _ in 0..amount_of_slices {
             let (left_slice, right_slice) = remaining_slice.split_at(MAX_UDP_SEND_SIZE - 1);
+            println!("Sending {} bytes of data...", left_slice.len());
             self.send_to(left_slice, address)?;
             remaining_slice = right_slice;
         }
@@ -170,24 +169,28 @@ impl LargeSend for UdpSocket {
         Ok(())
     }
     fn recv_large(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let mut output = Vec::with_capacity(MAX_UDP_SEND_SIZE);
         let network_buffer = &mut [0; MAX_UDP_SEND_SIZE];
         let mut bytes_amount = 0;
         while bytes_amount == 0 {
             bytes_amount = self.recv(network_buffer).unwrap_or(0);
         }
+        let mut remaining_parts = network_buffer[1] - 1;
+        dbg!(remaining_parts);
+
+        let mut output = Vec::with_capacity(MAX_UDP_SEND_SIZE * remaining_parts as usize);
         output.append(&mut network_buffer.to_vec());
 
-        let mut remaining_parts = network_buffer[1] + 1;
-        while remaining_parts > 0 {
+        while remaining_parts > 1 {
             let bytes_amount = self.recv(network_buffer).unwrap_or(0);
             if bytes_amount == 0 {
                 continue;
             }
+            println!("Received {} bytes of data", bytes_amount);
 
             output.append(&mut network_buffer.to_vec());
             remaining_parts -= 1;
         }
+        dbg!(output.len() / MAX_UDP_SEND_SIZE);
         Ok(output)
     }
 }

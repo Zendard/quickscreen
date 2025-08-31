@@ -1,4 +1,7 @@
-use crate::host::{HostingToUIMessage, UIToHostingMessage, network::ClientID};
+use crate::{
+    encoding::network::ClientID,
+    host::{HostingToUIMessage, UIToHostingMessage},
+};
 use libadwaita::{
     AlertDialog,
     gio::Cancellable,

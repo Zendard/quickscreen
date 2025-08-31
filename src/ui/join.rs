@@ -1,31 +1,36 @@
+use crate::{
+    encoding::NetworkFrame,
+    join::{JoinedToUIMessage, UIToJoinedMessage},
+};
 use libadwaita::{
     AlertDialog,
     gio::Cancellable,
     glib::object::{IsA, ObjectExt},
     gtk::{
-        Align, Button, Entry, EntryBuffer, Label, Stack, Widget,
-        prelude::{BoxExt, ButtonExt, EditableExt, EditableExtManual, EntryBufferExtManual},
+        Align, Button, DrawingArea, Entry, EntryBuffer, Label, Stack, Widget,
+        cairo::Surface,
+        prelude::{
+            BoxExt, ButtonExt, DrawingAreaExtManual, EditableExt, EditableExtManual,
+            EntryBufferExtManual, WidgetExt,
+        },
     },
     prelude::{AlertDialogExt, AlertDialogExtManual},
 };
 use std::{
+    cell::RefCell,
     rc::Rc,
     str::FromStr,
-    sync::{
-        Mutex,
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::mpsc::{self, Receiver, Sender},
     time::Duration,
 };
 
-use crate::join::{JoinedToUIMessage, UIToJoinedMessage};
-
 #[derive(Debug, Default, Clone)]
 struct JoinState {
-    message_sender: Rc<Mutex<Option<Sender<UIToJoinedMessage>>>>,
-    message_receiver: Rc<Mutex<Option<Receiver<JoinedToUIMessage>>>>,
+    message_sender: Rc<RefCell<Option<Sender<UIToJoinedMessage>>>>,
+    message_receiver: Rc<RefCell<Option<Receiver<JoinedToUIMessage>>>>,
     join_request_response_dialog: AlertDialog,
     parent_widget: Stack,
+    current_frame: Rc<RefCell<Option<Surface>>>,
 }
 
 pub fn build_page() -> impl IsA<Widget> {
@@ -123,6 +128,14 @@ pub fn build_page() -> impl IsA<Widget> {
         .css_classes(["title-1"])
         .build();
 
+    let drawing_area = DrawingArea::builder()
+        .content_width(1280)
+        .content_height(720)
+        .height_request(360)
+        .width_request(640)
+        .visible(false)
+        .build();
+
     let leave_button = Button::builder()
         .label("Leave")
         .css_classes(["destructive-action"])
@@ -144,6 +157,7 @@ pub fn build_page() -> impl IsA<Widget> {
         .spacing(16)
         .build();
     joined_page.append(&title);
+    joined_page.append(&drawing_area);
     joined_page.append(&leave_button);
 
     let stack = Stack::new();
@@ -174,8 +188,8 @@ pub fn build_page() -> impl IsA<Widget> {
             port_buffer.text().to_string(),
             &state_clone,
         );
-        *state_clone.message_sender.lock().unwrap() = Some(sender);
-        *state_clone.message_receiver.lock().unwrap() = Some(receiver);
+        state_clone.message_sender.replace(Some(sender));
+        state_clone.message_receiver.replace(Some(receiver));
         stack_clone.set_visible_child(&requesting_page);
     });
 
@@ -183,8 +197,7 @@ pub fn build_page() -> impl IsA<Widget> {
     let sender_clone = state.message_sender.clone();
     cancel_button.connect_clicked(move |_| {
         sender_clone
-            .lock()
-            .unwrap()
+            .borrow()
             .clone()
             .unwrap()
             .send(UIToJoinedMessage::Leave)
@@ -192,12 +205,20 @@ pub fn build_page() -> impl IsA<Widget> {
         stack_clone.set_visible_child_name("join-page");
     });
 
+    drawing_area.set_draw_func(move |drawing_area, cr, _, _| {
+        if let Some(texture) = &*state.current_frame.borrow() {
+            cr.set_source_surface(texture, 0., 0.).unwrap();
+            drawing_area.set_visible(true);
+        } else {
+            cr.set_source_rgb(0., 0., 0.);
+        }
+    });
+
     let sender_clone = state.message_sender.clone();
     let stack_clone = stack.clone();
     leave_button.connect_clicked(move |_| {
         sender_clone
-            .lock()
-            .unwrap()
+            .borrow()
             .clone()
             .unwrap()
             .send(UIToJoinedMessage::Leave)
@@ -232,7 +253,7 @@ fn start_joining(
 
 fn listen_for_message(state: &mut JoinState) {
     let receiver_clone = state.message_receiver.clone();
-    let mut receiver = receiver_clone.lock().unwrap();
+    let mut receiver = receiver_clone.borrow_mut();
     if receiver.is_none() {
         return;
     }
@@ -242,6 +263,7 @@ fn listen_for_message(state: &mut JoinState) {
             JoinedToUIMessage::JoinRequestResponse(accepted) => {
                 handle_join_request_response(accepted, state)
             }
+            JoinedToUIMessage::Frame(frame) => handle_frame(frame, state),
         }
     }
 }
@@ -269,12 +291,15 @@ fn handle_join_request_response(accepted: bool, state: &JoinState) {
             .set_body("You were refused");
         state
             .message_sender
-            .lock()
-            .unwrap()
-            .as_ref()
+            .borrow()
+            .clone()
             .unwrap()
             .send(UIToJoinedMessage::Leave)
             .unwrap();
         state.parent_widget.set_visible_child_name("join-page");
     }
+}
+
+fn handle_frame(frame: NetworkFrame, state: &mut JoinState) {
+    state.current_frame.replace(Some(frame.into()));
 }
